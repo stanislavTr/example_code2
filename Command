@@ -1,0 +1,42 @@
+<?php
+
+
+namespace App\Console\Commands;
+
+
+use App\Jobs\GrabFacebook;
+use App\Models\Pushed;
+use Illuminate\Console\Command;
+use Illuminate\Foundation\Bus\DispatchesJobs;
+
+class GrabAnalytics extends Command
+{
+    use DispatchesJobs;
+
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'grab:analytics';
+
+    /**
+     * Create a new command instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        parent::__construct();
+    }
+
+    public function handle()
+    {
+        $posts = Pushed::getTwoLastDayPushed();
+
+        foreach ($posts as $post) {
+            $job = new GrabFacebook($post);
+            $this->dispatch($job);
+        }
+    }
+}
