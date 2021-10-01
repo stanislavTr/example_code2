@@ -1,0 +1,167 @@
+<?php
+
+
+namespace App\Models;
+
+
+use App\Socials\Social;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Carbon;
+
+class Pushed extends Model
+{
+    protected $table = 'pushed';
+    public $timestamps = false;
+
+    /**
+     * @return HasOne
+     */
+    public function scheduler(): HasOne
+    {
+        return $this->hasOne('App\Models\Scheduler', 'ID', 'sid');
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough
+     */
+    public function socialThroughPushed()
+    {
+        return $this->hasManyThrough(
+            Social::class, 'App\Models\Scheduler',
+            'ID', 'ID', 'sid', 'SID'
+        );
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function analytic(): HasOne
+    {
+        return $this->hasOne('App\Models\Analytic', 'post_id', 'postid');
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function user(): HasOne
+    {
+        return $this->hasOne('App\Models\User', 'ID', 'uid');
+    }
+
+    /**
+     * @return Pushed|null
+     */
+    public static function getTwoLastDayPushed(): Pushed
+    {
+        return Pushed::where('date', '>=', Carbon::now()->subDays(2))
+            ->where('date', '<', Carbon::now()->subDay())->with('scheduler')->get();
+    }
+
+    /**
+     * @return int
+     */
+    public function getDiffAttribute(): int
+    {
+        $row = $this->selectRaw('`date`, TIMESTAMPDIFF(SECOND, `date`, NOW()) as diff')
+            ->where('sid', $this->ID)->orderBy('id', 'DESC')->limit(1)->get()->first();
+        return $row ? $row->diff : 0;
+    }
+
+    /**
+     * @param int $count
+     * @return Pushed[]|\Illuminate\Database\Eloquent\Builder[]|\Illuminate\Database\Eloquent\Collection|\Illuminate\Database\Query\Builder[]|\Illuminate\Support\Collection
+     */
+    public static function getPushedStats(int $count)
+    {
+        $count2 = $count - 1;
+
+        return self::selectRaw('COUNT(*) as count, sid, uid')
+            ->where('date', '>=', Carbon::now()->subDays($count))
+            ->where('date', '<', Carbon::now()->subDays($count2))
+            ->groupBy('sid')
+            ->groupBy('uid')
+            ->orderBy('uid')
+            ->get();
+    }
+
+    /**
+     * @param int $userId
+     * @param int $schedulerId
+     * @param int $pushId
+     * @param string $postId
+     * @param string|null $imageName
+     *
+     * @return bool
+     */
+    public static function add(int $userId, int $schedulerId, int $pushId, string $postId, ?string $imageName): bool
+    {
+        $pushed = new Pushed();
+        $pushed->uid = $userId;
+        $pushed->sid = $schedulerId;
+        $pushed->pushid = $pushId;
+        $pushed->postid = $postId;
+        $pushed->image_name = $imageName;
+        return $pushed->save();
+    }
+
+    /**
+     * @param int $scheduleId
+     *
+     * @return Pushed|null
+     */
+    public static function getLastPushedByScheduleId(int $scheduleId): Pushed
+    {
+        return Pushed::selectRaw('pushed.date, NOW() as date_now')
+            ->where('sid', $scheduleId)
+            ->orderBy('id', 'desc')
+            ->first();
+    }
+
+    /**
+     * @param int $day
+     * @param int $socialType
+     * @param int|null $userId
+     *
+     * @return Pushed[]|\Illuminate\Database\Eloquent\Builder[]|\Illuminate\Database\Eloquent\Collection|\Illuminate\Database\Query\Builder[]|\Illuminate\Support\Collection
+     */
+    public static function getPushedLastDaysSocialType(int $day, int $socialType, int $userId = null)
+    {
+        $query = self::whereHas('socialThroughPushed', function ($q) use ($socialType) {
+            $q->where('socials.SID', $socialType);
+        })
+            ->with('analytic')
+            ->with('user')
+            ->where('pushed.date', '>=', Carbon::now()->subDays($day))
+            ->where('pushed.date', '<', Carbon::now())
+            ->orderBy('date');
+
+        if (isset($userId)) {
+            $query->where('uid', $userId);
+        }
+
+        return $query->get()->groupBy('sid');
+    }
+
+    /**
+     * @param int $day
+     * @param int $socialType
+     * @param int $userId
+     * @param int $schedulerId
+     *
+     * @return Pushed[]|\Illuminate\Database\Eloquent\Builder[]|\Illuminate\Database\Eloquent\Collection|\Illuminate\Database\Query\Builder[]|\Illuminate\Support\Collection
+     */
+    public static function getPushedSchedulerDaysSocialType(int $day, int $socialType, int $userId, int $schedulerId)
+    {
+        return self::whereHas('socialThroughPushed', function ($q) use ($socialType) {
+            $q->where('socials.SID', $socialType);
+        })
+            ->with('analytic')
+            ->where('pushed.date', '>=', Carbon::now()->subDays($day))
+            ->where('pushed.date', '<', Carbon::now())
+            ->orderBy('date')
+            ->where('uid', $userId)
+            ->where('sid', $schedulerId)
+            ->get();
+    }
+}
